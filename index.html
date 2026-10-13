@@ -1,0 +1,486 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<title>Klassenzimmer-Timer</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#0b0c0d">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Timer">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" type="image/png" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<style>
+  :root {
+    --bg: #0b0c0d;
+    --track: #1c2328;
+    --accent: #7f9bad;
+    --glass: #3d4a53;
+    --panel: #13181b;
+    --line: #262f35;
+    --text: #b4bec5;
+    --dim: #7b878f;
+    --btn: #181f23;
+    --btn-on: #22303a;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    margin: 0; height: 100%;
+    background: var(--bg); color: var(--text);
+    overflow: hidden; overscroll-behavior: none;
+    touch-action: manipulation;
+    -webkit-user-select: none; user-select: none;
+    -webkit-touch-callout: none;
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, "Segoe UI", sans-serif;
+  }
+
+  /* ---------- Anzeige ---------- */
+  #stage {
+    position: fixed; top: 0; right: 0; bottom: 0; left: 0;
+    display: flex; align-items: center; justify-content: center;
+    padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+    cursor: pointer; /* damit iOS Taps auf die leere Fläche als Klick liefert */
+  }
+  .view { display: none; }
+  #stage[data-mode="ring"]  .ring  { display: block; }
+  #stage[data-mode="glass"] .glass { display: block; }
+
+  .ring  { width: min(80vw, 80vh); height: min(80vw, 80vh); }
+  .glass { height: min(84vh, 139vw); width: min(49.4vh, 81.8vw); }
+  @supports (height: 1dvh) {
+    .ring  { width: min(80vw, 80dvh); height: min(80vw, 80dvh); }
+    .glass { height: min(84dvh, 139vw); width: min(49.4dvh, 81.8vw); }
+  }
+
+  .track     { fill: none; stroke: var(--track); stroke-width: 8; }
+  .arc       { fill: none; stroke: var(--accent); stroke-width: 8; stroke-linecap: butt; }
+  .sand      { fill: var(--accent); }
+  .stream    { stroke: var(--accent); stroke-width: 1.6; stroke-linecap: round; }
+  .glassline { fill: none; stroke: var(--glass); stroke-width: 2.5; stroke-linejoin: round; }
+  .bar       { stroke: var(--glass); stroke-width: 3; stroke-linecap: round; }
+
+  /* ---------- Verstecktes Panel ---------- */
+  #panel {
+    position: fixed; left: 50%;
+    bottom: calc(16px + env(safe-area-inset-bottom));
+    width: min(560px, calc(100% - 32px));
+    display: grid; gap: 14px; padding: 18px;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 20px;
+    transform: translate(-50%, 16px); opacity: 0; visibility: hidden;
+    transition: opacity .22s ease, transform .22s ease, visibility 0s linear .22s;
+    cursor: default;
+  }
+  #panel.open {
+    transform: translate(-50%, 0); opacity: 1; visibility: visible;
+    transition: opacity .22s ease, transform .22s ease;
+  }
+  .row { display: grid; grid-template-columns: 84px 1fr; align-items: center; gap: 12px; }
+  .col { display: grid; gap: 8px; }
+  .lbl { color: var(--dim); font-size: 14px; }
+  .actions { display: grid; grid-template-columns: 1fr auto; gap: 10px; }
+  .stepper { display: grid; grid-template-columns: 48px 1fr 48px; gap: 8px; align-items: center; }
+  .stepper output { text-align: center; font-size: 20px; font-variant-numeric: tabular-nums; }
+  .presets { display: grid; grid-template-columns: repeat(8, 1fr); gap: 6px; }
+  .presets button { padding: 0; min-height: 44px; }
+  .seg { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+
+  button {
+    -webkit-appearance: none; appearance: none;
+    font: inherit; font-size: 17px; color: var(--text);
+    background: var(--btn); border: 1px solid var(--line); border-radius: 12px;
+    min-height: 48px; padding: 0 16px; cursor: pointer;
+  }
+  button[aria-pressed="true"] { background: var(--btn-on); border-color: #3b4a54; color: #dbe4ea; }
+  #primary { background: var(--btn-on); border-color: #3b4a54; color: #dbe4ea; }
+  button:disabled { opacity: .35; cursor: default; }
+  button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  @media (max-width: 520px) {
+    .row { grid-template-columns: 1fr; gap: 6px; }
+    .presets { grid-template-columns: repeat(4, 1fr); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    #panel, #panel.open { transition: none; }
+  }
+</style>
+</head>
+<body>
+
+<main id="stage" data-mode="ring">
+  <svg class="view ring" viewBox="0 0 200 200" role="img" aria-label="Kreis-Anzeige">
+    <circle class="track" cx="100" cy="100" r="88"/>
+    <circle id="arc" class="arc" cx="100" cy="100" r="88" transform="rotate(-90 100 100)"/>
+  </svg>
+
+  <svg class="view glass" viewBox="0 0 200 340" role="img" aria-label="Sanduhr-Anzeige">
+    <defs>
+      <clipPath id="glassClip"><path id="clipShape"/></clipPath>
+    </defs>
+    <rect id="sandTop" class="sand" x="0" y="20" width="200" height="150" clip-path="url(#glassClip)"/>
+    <rect id="sandBot" class="sand" x="0" y="320" width="200" height="0" clip-path="url(#glassClip)"/>
+    <line id="stream" class="stream" x1="100" y1="170" x2="100" y2="320" style="visibility:hidden"/>
+    <path id="outline" class="glassline"/>
+    <line class="bar" x1="36" y1="17" x2="164" y2="17"/>
+    <line class="bar" x1="36" y1="323" x2="164" y2="323"/>
+  </svg>
+</main>
+
+<section id="panel" role="dialog" aria-label="Einstellungen" aria-hidden="true">
+  <div class="actions">
+    <button id="primary" type="button">Start</button>
+    <button id="reset" type="button">Zurücksetzen</button>
+  </div>
+
+  <div class="row">
+    <span class="lbl">Dauer</span>
+    <div class="col">
+      <div class="stepper">
+        <button id="minus" type="button" aria-label="Kürzer">−</button>
+        <output id="minVal">10 Min.</output>
+        <button id="plus" type="button" aria-label="Länger">+</button>
+      </div>
+      <div id="presets" class="presets"></div>
+    </div>
+  </div>
+
+  <div class="row">
+    <span class="lbl">Anzeige</span>
+    <div class="seg">
+      <button type="button" data-mode="ring" aria-pressed="true">Kreis</button>
+      <button type="button" data-mode="glass" aria-pressed="false">Sanduhr</button>
+    </div>
+  </div>
+
+  <div class="row">
+    <span class="lbl">Ton</span>
+    <button id="sound" type="button" aria-pressed="false">Leiser Ton am Ende: aus</button>
+  </div>
+</section>
+
+<script>
+(() => {
+  'use strict';
+
+  /* ---------- Konstanten ---------- */
+  const LS_KEY  = 'klassenzimmer-timer.v1';
+  const MIN_MIN = 1, MAX_MIN = 120;
+  const PRESETS = [1, 2, 3, 5, 10, 15, 20, 30];
+  const RING_R  = 88, RING_C = 2 * Math.PI * RING_R;
+  // Sanduhr-Geometrie (viewBox 200 x 340, Hals genau in der Mitte)
+  const G = { top: 20, neck: 170, bottom: 320, cx: 100, wTop: 62, wNeck: 3.5, inset: 3 };
+
+  const $ = (id) => document.getElementById(id);
+  const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+
+  const el = {
+    stage: $('stage'), arc: $('arc'),
+    sandTop: $('sandTop'), sandBot: $('sandBot'), stream: $('stream'),
+    panel: $('panel'), primary: $('primary'), reset: $('reset'),
+    minus: $('minus'), plus: $('plus'), minVal: $('minVal'),
+    presets: $('presets'), sound: $('sound'),
+    modeBtns: Array.from(document.querySelectorAll('[data-mode]')).filter((b) => b.tagName === 'BUTTON')
+  };
+
+  /* ---------- Zustand ---------- */
+  // Zeit wird immer aus Zeitstempeln berechnet (Date.now), nie aus mitgezählten Ticks –
+  // so bleibt der Timer genau, auch wenn iOS das Rendern drosselt oder die App pausiert.
+  const state = {
+    minutes: 10,
+    mode: 'ring',            // 'ring' | 'glass'
+    sound: false,
+    status: 'idle',          // idle | running | paused | done
+    remaining: 10 * 60000,   // ms, gilt bei idle/paused
+    endAt: 0                 // Epoch-ms, gilt bei running
+  };
+  const durationMs = () => state.minutes * 60000;
+  function remainingMs(now = Date.now()) {
+    if (state.status === 'running') return Math.max(0, state.endAt - now);
+    if (state.status === 'done') return 0;
+    return state.remaining;
+  }
+
+  /* ---------- Speichern / Laden ---------- */
+  function save() {
+    try {
+      localStorage.setItem(LS_KEY, JSON.stringify({
+        minutes: state.minutes, mode: state.mode, sound: state.sound,
+        status: state.status, remaining: state.remaining, endAt: state.endAt
+      }));
+    } catch (e) { /* privater Modus o. Ä. – egal */ }
+  }
+  function load() {
+    let s = null;
+    try { s = JSON.parse(localStorage.getItem(LS_KEY) || 'null'); } catch (e) {}
+    if (s && typeof s === 'object') {
+      if (Number.isFinite(s.minutes)) state.minutes = clamp(Math.round(s.minutes), MIN_MIN, MAX_MIN);
+      if (s.mode === 'ring' || s.mode === 'glass') state.mode = s.mode;
+      state.sound = s.sound === true;
+    }
+    state.remaining = durationMs();
+    if (!s) return;
+    const now = Date.now();
+    if (s.status === 'running' && Number.isFinite(s.endAt) && s.endAt > now && s.endAt - now <= durationMs()) {
+      state.status = 'running'; state.endAt = s.endAt;
+    } else if (s.status === 'paused' && Number.isFinite(s.remaining) && s.remaining > 0 && s.remaining <= durationMs()) {
+      state.status = 'paused'; state.remaining = s.remaining;
+    }
+  }
+
+  /* ---------- Sanduhr-Geometrie ---------- */
+  // Halbbreite des oberen Kolbens; y läuft von G.top (oben) bis G.neck (Hals)
+  function halfW(y) {
+    const u = clamp((G.neck - y) / (G.neck - G.top), 0, 1);   // 0 am Hals … 1 oben
+    return G.wNeck + (G.wTop - G.wNeck) * Math.pow(Math.sin(Math.PI * u / 2), 1.4);
+  }
+  const halfWAt = (y) => halfW(y <= G.neck ? y : 2 * G.neck - y);   // unterer Kolben = Spiegelbild
+
+  // Flächentabelle: Sandvolumen (Anteil) -> Höhe des Sandspiegels.
+  // Dadurch läuft der Sand optisch gleichmäßig, obwohl die Form nicht linear ist.
+  const N = 240;
+  const TY = new Float64Array(N + 1);   // y-Werte vom Hals (170) nach oben (20)
+  const TF = new Float64Array(N + 1);   // kumulierte Fläche vom Hals aus, normiert 0..1
+  (function buildTable() {
+    const dy = (G.neck - G.top) / N;
+    let area = 0;
+    TY[0] = G.neck; TF[0] = 0;
+    for (let i = 1; i <= N; i++) {
+      const y0 = G.neck - dy * (i - 1), y1 = G.neck - dy * i;
+      area += (halfW(y0) + halfW(y1)) * dy;
+      TY[i] = y1; TF[i] = area;
+    }
+    for (let i = 0; i <= N; i++) TF[i] /= area;
+  })();
+
+  // y-Position der Sandoberfläche im oberen Kolben bei Füllanteil f (0..1)
+  function levelTop(f) {
+    if (f <= 0) return G.neck;
+    if (f >= 1) return G.top;
+    let lo = 0, hi = N;
+    while (hi - lo > 1) {
+      const mid = (lo + hi) >> 1;
+      if (TF[mid] <= f) lo = mid; else hi = mid;
+    }
+    const t = (f - TF[lo]) / (TF[hi] - TF[lo]);
+    return TY[lo] + (TY[hi] - TY[lo]) * t;
+  }
+
+  function outlinePath(inset) {
+    const M = 90, L = [], R = [];
+    for (let i = 0; i <= 2 * M; i++) {
+      const y = G.top + (G.bottom - G.top) * i / (2 * M);
+      const h = Math.max(1, halfWAt(y) - inset);
+      L.push((G.cx - h).toFixed(2) + ' ' + y.toFixed(2));
+      R.push((G.cx + h).toFixed(2) + ' ' + y.toFixed(2));
+    }
+    return 'M' + L.concat(R.reverse()).join('L') + 'Z';
+  }
+  function initGlass() {
+    $('outline').setAttribute('d', outlinePath(0));
+    $('clipShape').setAttribute('d', outlinePath(G.inset));
+  }
+
+  /* ---------- Zeichnen ---------- */
+  let lastKey = '';
+  function draw() {
+    const f = clamp(remainingMs() / durationMs(), 0, 1);
+    const q = Math.round(f * 4000) / 4000;               // nur bei sichtbarer Änderung neu zeichnen
+    const flowing = state.status === 'running' && q > 0;
+    const key = state.mode + '|' + q + '|' + flowing;
+    if (key === lastKey) return;
+    lastKey = key;
+
+    if (state.mode === 'ring') {
+      // Rest-Bogen endet immer bei 12 Uhr; sein Anfang wandert im Uhrzeigersinn.
+      el.arc.style.visibility = q > 0 ? 'visible' : 'hidden';
+      el.arc.setAttribute('stroke-dasharray', (q >= 1 ? RING_C + 2 : RING_C * q) + ' ' + RING_C);
+      el.arc.setAttribute('transform', 'rotate(' + (-90 + (1 - q) * 360).toFixed(3) + ' 100 100)');
+    } else {
+      const yTop = levelTop(q);                          // Sandspiegel oben
+      const yBot = (G.top + G.bottom) - yTop;            // Sandspiegel unten (Spiegelbild des Leerraums)
+      el.sandTop.setAttribute('y', yTop.toFixed(2));
+      el.sandTop.setAttribute('height', q > 0 ? (G.neck - yTop).toFixed(2) : 0);
+      el.sandBot.setAttribute('y', yBot.toFixed(2));
+      el.sandBot.setAttribute('height', q < 1 ? (G.bottom - yBot).toFixed(2) : 0);
+      el.stream.setAttribute('y2', yBot.toFixed(2));
+      el.stream.style.visibility = flowing ? 'visible' : 'hidden';
+    }
+  }
+
+  /* ---------- Bildschirm wachhalten ---------- */
+  let wakeLock = null;
+  async function acquireWakeLock() {
+    try {
+      if ('wakeLock' in navigator && !wakeLock && document.visibilityState === 'visible') {
+        wakeLock = await navigator.wakeLock.request('screen');
+        wakeLock.addEventListener('release', () => { wakeLock = null; });
+      }
+    } catch (e) { wakeLock = null; }
+  }
+  function releaseWakeLock() {
+    if (wakeLock) { wakeLock.release().catch(() => {}); wakeLock = null; }
+  }
+
+  /* ---------- Ton (optional, leise) ---------- */
+  // iOS erlaubt Audio nur nach Fingertipp -> Kontext wird beim Start / beim Einschalten angelegt.
+  // Hinweis: Web-Audio folgt auf dem iPad dem Stumm-Schalter.
+  let ac = null;
+  function unlockAudio() {
+    if (!state.sound) return;
+    try {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return;
+      if (!ac) ac = new AC();
+      if (ac.state === 'suspended') ac.resume();
+    } catch (e) {}
+  }
+  function chime() {
+    if (!state.sound || !ac) return;
+    try {
+      if (ac.state === 'suspended') ac.resume();
+      const t = ac.currentTime;
+      const osc = ac.createOscillator(), gain = ac.createGain();
+      osc.type = 'sine';
+      osc.frequency.value = 440;
+      gain.gain.setValueAtTime(0.0001, t);
+      gain.gain.exponentialRampToValueAtTime(0.16, t + 0.12);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t + 3);
+      osc.connect(gain); gain.connect(ac.destination);
+      osc.start(t); osc.stop(t + 3.1);
+    } catch (e) {}
+  }
+
+  /* ---------- Ablauf ---------- */
+  let raf = 0;
+  function loop() { if (!raf) raf = requestAnimationFrame(frame); }
+  function frame() {
+    raf = 0;
+    if (state.status === 'running' && Date.now() >= state.endAt) finish();
+    draw();
+    if (state.status === 'running') loop();
+  }
+  function start() {
+    if (state.status === 'done') state.status = 'idle';
+    if (state.status === 'idle') state.remaining = durationMs();
+    state.endAt = Date.now() + state.remaining;
+    state.status = 'running';
+    unlockAudio(); acquireWakeLock(); save();
+    closePanel(); syncPanel(); loop();
+  }
+  function pause() {
+    state.remaining = remainingMs();
+    if (state.remaining <= 0) { finish(); draw(); return; }
+    state.status = 'paused';
+    releaseWakeLock(); save(); syncPanel(); draw();
+  }
+  function finish() {
+    state.status = 'done'; state.remaining = 0; state.endAt = 0;
+    releaseWakeLock(); save(); chime(); syncPanel();
+  }
+  function reset() {
+    state.status = 'idle'; state.remaining = durationMs(); state.endAt = 0;
+    releaseWakeLock(); save(); syncPanel(); draw();
+  }
+  function setMinutes(m) {
+    state.minutes = clamp(Math.round(m), MIN_MIN, MAX_MIN);
+    reset();   // eine neue Dauer startet immer bei vollem Kreis / voller Sanduhr
+  }
+  const stepUp   = (m) => (m < 10 ? m + 1 : m + 5);
+  const stepDown = (m) => (m <= 10 ? m - 1 : m - 5);
+
+  /* ---------- Panel ---------- */
+  let panelOpen = false, hideTimer = 0;
+  function openPanel() {
+    panelOpen = true;
+    el.panel.classList.add('open');
+    el.panel.inert = false;
+    el.panel.setAttribute('aria-hidden', 'false');
+    armAutoHide();
+  }
+  function closePanel() {
+    panelOpen = false;
+    clearTimeout(hideTimer);
+    el.panel.classList.remove('open');
+    el.panel.inert = true;
+    el.panel.setAttribute('aria-hidden', 'true');
+    if (document.activeElement && el.panel.contains(document.activeElement)) document.activeElement.blur();
+  }
+  // Läuft der Timer, schließt sich das Panel von selbst – damit es nicht auf der Leinwand stehen bleibt.
+  function armAutoHide() {
+    clearTimeout(hideTimer);
+    if (panelOpen && state.status === 'running') hideTimer = setTimeout(closePanel, 7000);
+  }
+
+  const LABEL = { idle: 'Start', running: 'Pause', paused: 'Weiter', done: 'Neu starten' };
+  function syncPanel() {
+    el.primary.textContent = LABEL[state.status];
+    el.reset.disabled = state.status === 'idle';
+    el.minVal.textContent = state.minutes + ' Min.';
+    el.minus.disabled = state.minutes <= MIN_MIN;
+    el.plus.disabled = state.minutes >= MAX_MIN;
+    el.presets.querySelectorAll('button').forEach((b) =>
+      b.setAttribute('aria-pressed', String(+b.dataset.m === state.minutes)));
+    el.modeBtns.forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.mode === state.mode)));
+    el.sound.setAttribute('aria-pressed', String(state.sound));
+    el.sound.textContent = 'Leiser Ton am Ende: ' + (state.sound ? 'an' : 'aus');
+    armAutoHide();
+  }
+
+  /* ---------- Events ---------- */
+  PRESETS.forEach((m) => {
+    const b = document.createElement('button');
+    b.type = 'button'; b.textContent = m; b.dataset.m = m;
+    b.setAttribute('aria-label', m + (m === 1 ? ' Minute' : ' Minuten'));
+    el.presets.appendChild(b);
+  });
+  el.presets.addEventListener('click', (e) => {
+    const b = e.target.closest('button');
+    if (b) setMinutes(+b.dataset.m);
+  });
+  el.primary.addEventListener('click', () => { if (state.status === 'running') pause(); else start(); });
+  el.reset.addEventListener('click', reset);
+  el.minus.addEventListener('click', () => setMinutes(stepDown(state.minutes)));
+  el.plus.addEventListener('click', () => setMinutes(stepUp(state.minutes)));
+  el.modeBtns.forEach((b) => b.addEventListener('click', () => {
+    state.mode = b.dataset.mode;
+    el.stage.dataset.mode = state.mode;
+    save(); syncPanel(); draw();
+  }));
+  el.sound.addEventListener('click', () => {
+    state.sound = !state.sound;
+    if (state.sound) { unlockAudio(); chime(); }   // kurze Hörprobe beim Einschalten
+    save(); syncPanel();
+  });
+
+  // Tippen auf die Anzeige öffnet/schließt das Panel
+  el.stage.addEventListener('click', () => { if (panelOpen) closePanel(); else openPanel(); });
+  el.panel.addEventListener('pointerdown', armAutoHide);
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') closePanel();
+    else if (e.code === 'Space' && e.target === document.body) {
+      e.preventDefault();
+      if (state.status === 'running') pause(); else start();
+    }
+  });
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && state.status === 'running') { acquireWakeLock(); loop(); }
+  });
+  // Pinch-Zoom und Kontextmenü auf dem iPad unterbinden
+  ['gesturestart', 'gesturechange'].forEach((t) => document.addEventListener(t, (e) => e.preventDefault()));
+  document.addEventListener('contextmenu', (e) => e.preventDefault());
+
+  /* ---------- Start ---------- */
+  load();
+  initGlass();
+  el.stage.dataset.mode = state.mode;
+  el.panel.inert = true;
+  syncPanel();
+  draw();
+  if (state.status === 'running') { acquireWakeLock(); loop(); }
+})();
+</script>
+</body>
+</html>
